@@ -17,6 +17,7 @@ typedef struct {
     PyObject *tgtkey;
     PyObject *currkey;
     PyObject *currvalue;
+    int groupnum;
 } groupbyobject;
 
 static PyTypeObject groupby_type;
@@ -40,6 +41,7 @@ groupby_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     gbo->currkey = NULL;
     gbo->currvalue = NULL;
     gbo->keyfunc = keyfunc;
+    gbo->groupnum = 0;
     Py_INCREF(keyfunc);
     gbo->it = PyObject_GetIter(it);
     if (gbo->it == NULL) {
@@ -87,15 +89,20 @@ groupby_next(groupbyobject *gbo)
             int rcmp;
 
             rcmp = PyObject_RichCompareBool(gbo->tgtkey, gbo->currkey, Py_EQ);
-            if (rcmp == -1)
+            if (rcmp == -1) {
+                gbo->groupnum += 1;
                 return NULL;
-            else if (rcmp == 0)
+            } else if (rcmp == 0) {
                 break;
+            }
         }
 
         newvalue = PyIter_Next(gbo->it);
-        if (newvalue == NULL)
+        if (newvalue == NULL) {
+            // gbo->currkey = NULL;
+            gbo->groupnum += 1;
             return NULL;
+        }
 
         if (gbo->keyfunc == Py_None) {
             newkey = newvalue;
@@ -115,6 +122,7 @@ groupby_next(groupbyobject *gbo)
     Py_INCREF(gbo->currkey);
     Py_XSETREF(gbo->tgtkey, gbo->currkey);
 
+    gbo->groupnum += 1;
     grouper = _grouper_create(gbo, gbo->tgtkey);
     if (grouper == NULL)
         return NULL;
@@ -228,6 +236,7 @@ typedef struct {
     PyObject_HEAD
     PyObject *parent;
     PyObject *tgtkey;
+    int groupnum;
 } _grouperobject;
 
 static PyTypeObject _grouper_type;
@@ -252,6 +261,7 @@ _grouper_create(groupbyobject *parent, PyObject *tgtkey)
     if (igo == NULL)
         return NULL;
     igo->parent = (PyObject *)parent;
+    igo->groupnum = parent->groupnum;
     Py_INCREF(parent);
     igo->tgtkey = tgtkey;
     Py_INCREF(tgtkey);
@@ -283,6 +293,10 @@ _grouper_next(_grouperobject *igo)
     groupbyobject *gbo = (groupbyobject *)igo->parent;
     PyObject *newvalue, *newkey, *r;
     int rcmp;
+
+    if (igo->groupnum != gbo->groupnum) {
+        return NULL;
+    }
 
     if (gbo->currvalue == NULL) {
         newvalue = PyIter_Next(gbo->it);
